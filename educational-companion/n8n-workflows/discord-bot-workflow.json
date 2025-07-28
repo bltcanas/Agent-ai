@@ -1,0 +1,312 @@
+{
+  "name": "Educational Discord Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "channel": "={{$env.DISCORD_CHANNEL_ID}}",
+        "options": {
+          "allowedUsers": "={{$env.DISCORD_ALLOWED_USERS}}",
+          "ignoreBot": true
+        }
+      },
+      "id": "discord-trigger",
+      "name": "Discord Message Trigger",
+      "type": "n8n-nodes-base.discordTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "discord-bot-credentials",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "help-command",
+              "leftValue": "={{$json.content}}",
+              "rightValue": "!help",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            },
+            {
+              "id": "explain-command",
+              "leftValue": "={{$json.content}}",
+              "rightValue": "!explain",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            },
+            {
+              "id": "summarize-command",
+              "leftValue": "={{$json.content}}",
+              "rightValue": "!summarize",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            },
+            {
+              "id": "question-command",
+              "leftValue": "={{$json.content}}",
+              "rightValue": "!ask",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combineOperation": "any"
+        },
+        "options": {}
+      },
+      "id": "command-router",
+      "name": "Command Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "channel": "={{$json.channel_id}}",
+        "text": "🤖 **Educational Assistant Commands**\\n\\n📚 **!explain [topic]** - Get a simple explanation of a concept\\n📝 **!summarize [text/notes]** - Get a concise summary\\n❓ **!ask [question]** - Ask any educational question\\n💡 **!help** - Show this help message\\n\\n**Examples:**\\n• `!explain photosynthesis`\\n• `!summarize my notes about calculus`\\n• `!ask What is the difference between mitosis and meiosis?`\\n\\n*I maintain context of our conversation, so feel free to ask follow-up questions!*"
+      },
+      "id": "help-response",
+      "name": "Help Response",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [680, 100],
+      "credentials": {
+        "discordBotApi": {
+          "id": "discord-bot-credentials",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "messageValues": [
+            {
+              "role": "system",
+              "content": "You are an educational AI assistant integrated into Discord. Your role is to help students with their studies by:\n\n1. **Explaining Concepts**: Provide clear, simple explanations of complex topics\n2. **Summarizing Content**: Create concise summaries of notes or study materials\n3. **Answering Questions**: Respond to educational questions with detailed, helpful answers\n4. **Maintaining Context**: Remember previous parts of the conversation for follow-up questions\n\nAlways respond in a friendly, organized manner using Discord-friendly formatting (bold, italics, code blocks). Keep responses educational and encouraging. If you don't know something, suggest reliable resources for further learning."
+            },
+            {
+              "role": "user",
+              "content": "User: {{$json.author.username}}\\nChannel: {{$json.channel_id}}\\nMessage: {{$json.content}}\\nTimestamp: {{$json.timestamp}}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4,
+          "maxTokens": 1500
+        }
+      },
+      "id": "ai-response-generator",
+      "name": "AI Response Generator",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [680, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "={{$json.channel_id}}",
+        "text": "={{$node['AI Response Generator'].json['choices'][0]['message']['content']}}"
+      },
+      "id": "send-ai-response",
+      "name": "Send AI Response",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "credentials": {
+        "discordBotApi": {
+          "id": "discord-bot-credentials",
+          "name": "Discord Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": "={{$env.GOOGLE_SHEETS_CONVERSATION_LOG_ID}}",
+        "sheetName": "ConversationLog",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{$json.timestamp}}",
+            "User": "={{$json.author.username}}",
+            "Channel": "={{$json.channel_id}}",
+            "Message": "={{$json.content}}",
+            "AI_Response": "={{$node['AI Response Generator'].json['choices'][0]['message']['content']}}",
+            "Command_Type": "={{$json.content.split(' ')[0]}}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "User",
+              "displayName": "User",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Channel",
+              "displayName": "Channel",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Message",
+              "displayName": "Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Response",
+              "displayName": "AI_Response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Command_Type",
+              "displayName": "Command_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-conversation",
+      "name": "Log Conversation",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1120, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Discord Message Trigger": {
+      "main": [
+        [
+          {
+            "node": "Command Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Command Router": {
+      "main": [
+        [
+          {
+            "node": "Help Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Response Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Response Generator": {
+      "main": [
+        [
+          {
+            "node": "Send AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send AI Response": {
+      "main": [
+        [
+          {
+            "node": "Log Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "educational-discord-bot",
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "education",
+      "name": "education"
+    },
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "discord",
+      "name": "discord"
+    }
+  ]
+}

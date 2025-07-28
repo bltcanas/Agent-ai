@@ -1,0 +1,286 @@
+{
+  "name": "Educational Audio Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute",
+              "minute": 5
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": "{{$env.GOOGLE_DRIVE_FOLDER_ID}}",
+        "event": "fileCreated",
+        "options": {
+          "fileTypes": "audio/*"
+        }
+      },
+      "id": "google-drive-trigger",
+      "name": "Google Drive Audio Monitor",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 3,
+      "position": [240, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": "={{$node['Google Drive Audio Monitor'].json['id']}}"
+      },
+      "id": "download-audio-file",
+      "name": "Download Audio File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [460, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "data",
+        "options": {
+          "model": "whisper-1",
+          "language": "en",
+          "prompt": "This is an educational class recording. Please transcribe accurately including any technical terms, questions from students, and explanations from the instructor.",
+          "response_format": "verbose_json"
+        }
+      },
+      "id": "whisper-transcription",
+      "name": "OpenAI Whisper Transcription",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4o-mini",
+        "messages": {
+          "messageValues": [
+            {
+              "role": "system",
+              "content": "You are an educational AI assistant. Your task is to analyze class transcriptions and create comprehensive educational materials. Generate:\n\n1. **Detailed Notes**: Well-structured notes covering all key topics discussed\n2. **Lesson Summary**: A concise overview of the main learning objectives and outcomes\n3. **Confusing Concepts**: Identify complex terms, unanswered questions, or potentially difficult concepts with simple explanations and suggested resources\n\nFormat everything in clear, organized Markdown. Focus on making the content accessible and educational."
+            },
+            {
+              "role": "user",
+              "content": "Please analyze this class transcription and create educational materials:\n\n**Class Audio File**: {{$node['Google Drive Audio Monitor'].json['name']}}\n**Duration**: {{$node['OpenAI Whisper Transcription'].json['duration']}} seconds\n**Transcription**:\n{{$node['OpenAI Whisper Transcription'].json['text']}}\n\n**Segments with Timestamps**:\n{{$node['OpenAI Whisper Transcription'].json['segments']}}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 4000
+        }
+      },
+      "id": "generate-educational-content",
+      "name": "Generate Educational Content",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai-credentials",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "folderId": "={{$env.GOOGLE_DRIVE_NOTES_FOLDER_ID}}",
+        "name": "={{$node['Google Drive Audio Monitor'].json['name'].replace(/\\.[^/.]+$/, '')}} - Educational Notes.md",
+        "binaryData": false,
+        "fileContent": "={{$node['Generate Educational Content'].json['choices'][0]['message']['content']}}",
+        "options": {
+          "parents": {
+            "parent": [
+              "={{$env.GOOGLE_DRIVE_NOTES_FOLDER_ID}}"
+            ]
+          }
+        }
+      },
+      "id": "save-to-google-drive",
+      "name": "Save Notes to Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1120, 200],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-credentials",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "page",
+        "operation": "create",
+        "pageId": "={{$env.NOTION_DATABASE_ID}}",
+        "simple": false,
+        "properties": {
+          "propertyValues": [
+            {
+              "key": "Name",
+              "type": "title",
+              "title": "={{$node['Google Drive Audio Monitor'].json['name'].replace(/\\.[^/.]+$/, '')}} - Class Notes"
+            },
+            {
+              "key": "Content",
+              "type": "rich_text",
+              "richText": "={{$node['Generate Educational Content'].json['choices'][0]['message']['content']}}"
+            },
+            {
+              "key": "Date",
+              "type": "date",
+              "date": "={{new Date().toISOString().split('T')[0]}}"
+            },
+            {
+              "key": "Audio File",
+              "type": "url",
+              "url": "={{$node['Google Drive Audio Monitor'].json['webViewLink']}}"
+            }
+          ]
+        }
+      },
+      "id": "save-to-notion",
+      "name": "Save Notes to Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "notion-credentials",
+          "name": "Notion API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "={{$env.DISCORD_CHANNEL_ID}}",
+        "text": "📚 **New Class Notes Generated!**\\n\\n**File**: {{$node['Google Drive Audio Monitor'].json['name']}}\\n**Duration**: {{Math.floor($node['OpenAI Whisper Transcription'].json['duration'] / 60)}} minutes\\n\\n✅ Transcription completed\\n✅ Educational notes generated\\n✅ Saved to Google Drive and Notion\\n\\n*Ready for review and questions!*"
+      },
+      "id": "discord-notification",
+      "name": "Discord Notification",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1340, 300],
+      "credentials": {
+        "discordBotApi": {
+          "id": "discord-bot-credentials",
+          "name": "Discord Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Google Drive Audio Monitor": {
+      "main": [
+        [
+          {
+            "node": "Download Audio File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio File": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Whisper Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Whisper Transcription": {
+      "main": [
+        [
+          {
+            "node": "Generate Educational Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Educational Content": {
+      "main": [
+        [
+          {
+            "node": "Save Notes to Google Drive",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Save Notes to Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Notes to Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Discord Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Notes to Notion": {
+      "main": [
+        [
+          {
+            "node": "Discord Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "educational-audio-processor",
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "education",
+      "name": "education"
+    }
+  ]
+}
